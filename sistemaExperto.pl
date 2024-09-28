@@ -1,19 +1,84 @@
 :- use_module(library(csv)).
 :- use_module(library(apply)).
+:- use_module(library(http/http_open)).
+:- use_module(library(http/http_client)).
+:- use_module(library(filesex)).
+
 :- dynamic vulnerabilidad/7.
 :- dynamic exploit/16.
 :- dynamic exploits_cargados/0.
+:- discontiguous descargar_exploit_db/0, descargar_cve_db/0.
+
+% /download/9083
+
+descargar_archivo(URL, NombreArchivo) :-
+    setup_call_cleanup(
+        http_open(URL, Stream, []),
+        (   setup_call_cleanup(
+                open(NombreArchivo, write, Out),
+                copy_stream_data(Stream, Out),
+                close(Out)
+            )
+        ),
+        close(Stream)
+    ).
+
+
+
 
 % Cargar las vulnerabilidades desde el archivo CSV
+
+
+
+
+
+
+% Cargar vulnerabilidades desde un archivo CSV
+% Cargar vulnerabilidades desde un archivo CSV
+% Cargar vulnerabilidades desde el archivo CSV
 cargar_vulnerabilidades(File) :-
+    % Crear un archivo temporal para las filas válidas
+    atomic_list_concat(['temp_', File], TempFile),
+    open(TempFile, write, TempStream),
     catch(
-        csv_read_file(File, Filas, [functor(fila), strip(true)]),
+        (
+            % Abrir el archivo original y leer línea por línea
+            open(File, read, Stream),
+            contar_filas(Stream, 1, TempStream), % Contar y escribir filas válidas
+            close(Stream),
+            close(TempStream)
+        ),
         Error,
-        (format('Error al cargar vulnerabilidades desde el archivo ~w: ~w~n', [File, Error]), fail)
+        (
+            format('Error al cargar vulnerabilidades desde el archivo ~w: ~w~n', [File, Error]),
+            fail
+        )
     ),
+    % Cargar el archivo temporal
+    catch(
+        csv_read_file(TempFile, Filas, [functor(fila), strip(true)]),
+        Error,
+        (format('Error al cargar vulnerabilidades desde el archivo ~w: ~w~n', [TempFile, Error]), fail)
+    ),
+    % Procesar las filas válidas
     (   Filas = [_Encabezado|Datos] ->
         assert_vulnerabilidades(Datos)
-    ;   format('El archivo ~w está vacío o no tiene el formato correcto.~n', [File])
+    ;   format('El archivo ~w está vacío o no tiene el formato correcto.~n', [TempFile])
+    ),
+    % Borrar el archivo temporal
+    delete_file(TempFile).
+
+% Contar filas y escribir en el archivo temporal
+contar_filas(Stream, N, TempStream) :-
+    read_line_to_string(Stream, Line),
+    (   Line == end_of_file
+    ->  true
+    ;   (   N > 11 % Solo procesar líneas a partir de la 12
+        ->  write(TempStream, Line), nl(TempStream)
+        ;   true
+        ),
+        N1 is N + 1,
+        contar_filas(Stream, N1, TempStream)
     ).
 
 % Afirmar las vulnerabilidades en la base de datos
@@ -22,6 +87,12 @@ assert_vulnerabilidades([Fila|Resto]) :-
     Fila = fila(Name, Status, Description, References, Phase, Votes, Comments),
     assert(vulnerabilidad(Name, Status, Description, References, Phase, Votes, Comments)),
     assert_vulnerabilidades(Resto).
+
+
+
+
+
+
 
 % Cargar los exploits desde el archivo CSV
 cargar_exploits(File) :-
@@ -39,36 +110,36 @@ cargar_exploits(File) :-
 % Afirmar los exploits en la base de datos
 assert_exploits([]).
 assert_exploits([Fila|Resto]) :-
-    Fila = fila(_, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codes, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+    Fila = fila(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codes, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
     (   var(Codes) ->
         true
     ;   atomic_list_concat(ListaCodigos, ';', Codes),
-        procesar_codigos(File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, ListaCodigos, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl)
+        procesar_codigos(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, ListaCodigos, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl)
     ),
     assert_exploits(Resto).
 
 % Procesar la lista de códigos y solo insertar aquellos que contienen "CVE"
-procesar_codigos(_, _, _, _, _, _, _, _, _, _, [], _, _, _, _, _).
-procesar_codigos(File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, [Codigo|Resto], Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl) :-
+procesar_codigos(_,_, _, _, _, _, _, _, _, _, _, [], _, _, _, _, _).
+procesar_codigos(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, [Codigo|Resto], Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl) :-
     (   sub_string(Codigo, _, _, _, "CVE") ->
-        assert(exploit(_, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl))
+        assert(exploit(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl))
     ;   true
     ),
-    procesar_codigos(File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Resto, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl).
+    procesar_codigos(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Resto, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl).
 
 % Consultar vulnerabilidades por nombre
 consultar_vulnerabilidad_por_nombre(Nombre) :-
     format('Buscando vulnerabilidad con el nombre: ~w~n', [Nombre]),  % Imprime lo que está buscando
-    atom_string(NombreAtom, Nombre),  % Convierte el string a átomo para la comparación
-    (   vulnerabilidad(NombreAtom, Status, Description, References, Phase, Votes, Comments) ->
+    (   vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Comments) ->
         format('--- Información de la Vulnerabilidad ---~n', []),
         format('Nombre: ~w~nEstado: ~w~nDescripción: ~w~nReferencias: ~w~nFase: ~w~nVotos: ~w~nComentarios: ~w~n',
-            [NombreAtom, Status, Description, References, Phase, Votes, Comments]),
+            [Nombre, Status, Description, References, Phase, Votes, Comments]),
         % Si se encuentra la vulnerabilidad, buscar exploits asociados
-        atom_string(Atom, NombreAtom),
-        consultar_exploits_por_codigo(Atom),
-    ;   format('No se encontró la vulnerabilidad ~w.~n', [NombreAtom])
+        atom_string(Atom, Nombre),
+    consultar_exploits_por_codigo(Atom)
+    ;   format('No se encontró la vulnerabilidad ~w.~n', [Nombre])
     ).
+
 
 % Predicado para buscar exploits asociados a una vulnerabilidad
 buscar_exploit_por_vulnerabilidad(Vulnerabilidad) :-
@@ -87,6 +158,7 @@ consultar_exploit_por_codigo(Codigo) :-
             Resultados),
     (   Resultados \= []
     ->  format('--- Información del Exploit ---~n'),
+        
         consultar_exploits_por_codigo(Codigo)
             ;   format('No se encontró ningún exploit con el código ~w.~n', [Codigo])
     ).
@@ -95,8 +167,9 @@ consultar_exploit_por_codigo(Codigo) :-
 % Mostrar todos los exploits en la base de datos de manera legible
 mostrar_exploits :-
     format('--- Lista de Exploits ---~n'),
-    (   exploit(_, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+    (   exploit(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
         format('-----------------------------------------------------~n'),
+        
         safe_format('Código: ~w~n', Codigo),
         safe_format('Archivo: ~w~n', File),
         safe_format('Descripción: ~w~n', Description),
@@ -176,21 +249,68 @@ mostrar_vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Co
 
 
 
-consultar_exploits_por_codigo(Codigo) :-
-    writeln(Codigo),  % Imprime el código para depuración
-    findall(
-        (File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
-        exploit(_, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
-        Exploits
-    ),
-    (   Exploits \= []
-    ->  format('--- Exploits para el código ~w ---~n', [Codigo]),
-        forall(member((File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl), Exploits),
-            format('Archivo: ~w~nDescripción: ~w~nFecha Publicación: ~w~nAutor: ~w~nTipo: ~w~nPlataforma: ~w~nPuerto: ~w~nFecha Agregado: ~w~nFecha Actualizado: ~w~nVerificado: ~w~nEtiquetas: ~w~nAlias: ~w~nScreenshot URL: ~w~nApp URL: ~w~nFuente URL: ~w~n',
-            [File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl])
-        )
-    ;   format('No se encontró ningún exploit para el código ~w.~n', [Codigo])
-    ).
+    consultar_exploits_por_codigo(Codigo) :-
+        writeln(Codigo),  % Imprime el código para depuración
+        findall(
+            (Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+            exploit(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+            Exploits
+        ),
+        (   Exploits \= []
+        ->  format('--- Exploits para el código ~w ---~n', [Codigo]),
+            % Extraer todos los IDs
+            findall(Id, member((Id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _), Exploits), Ids),
+            forall(member((Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl), Exploits),
+                format('ID: ~w~nArchivo: ~w~nDescripción: ~w~nFecha Publicación: ~w~nAutor: ~w~nTipo: ~w~nPlataforma: ~w~nPuerto: ~w~nFecha Agregado: ~w~nFecha Actualizado: ~w~nVerificado: ~w~nEtiquetas: ~w~nAlias: ~w~nScreenshot URL: ~w~nApp URL: ~w~nFuente URL: ~w~n',
+                [Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl])
+            ),
+            % Preguntar al usuario qué desea hacer para cada exploit
+            preguntar_opcion_exploit(Codigo, Ids)  % Pasar todos los Ids a la función
+        ;   format('No se encontró ningún exploit para el código ~w.~n', [Codigo])
+        ).
+    
+    % Preguntar opción para los exploits
+    preguntar_opcion_exploit(Codigo, [Id|Ids]) :-
+        writeln('¿Qué deseas hacer?'),
+        writeln('1. Ver el código fuente del exploit'),
+        writeln('2. Salir'),
+        read(Opcion),
+        manejar_opcion_exploit(Opcion, Codigo, Id),
+        preguntar_opcion_exploit(Codigo, Ids).  % Preguntar nuevamente con el resto de los IDs
+    
+    preguntar_opcion_exploit(_, []) :- 
+        writeln('No hay más exploits para preguntar.').
+    
+    % Manejar la opción seleccionada por el usuario
+    manejar_opcion_exploit(1, Codigo, Id) :-
+        ver_codigo_fonte(Codigo, Id),  % Implementar este predicado según tus necesidades
+        true.  % Placeholder
+
+    manejar_opcion_exploit(2, _, _) :-
+        writeln('Saliendo...').
+    manejar_opcion_exploit(_, Codigo, Id) :-
+        writeln('Opción no válida, intenta de nuevo.'),
+        ver_codigo_fonte(Codigo, Id).  % O puedes ajustar esto según necesites
+    
+        
+        
+        
+        % Implementar el predicado ver_codigo_fonte con dos parámetros
+        ver_codigo_fonte(Codigo, Id) :-  % Acepta dos parámetros
+            format('Mostrando código fuente para el exploit con código ~w y ID ~w...~n', [Codigo, Id]),
+            atomic_list_concat(['https://www.exploit-db.com/download/', Id], URL),  % Genera la URL
+            http_open(URL, Stream, []),  % Abre la conexión HTTP
+            read_string(Stream, _, Content),  % Lee el contenido del archivo
+            close(Stream),  % Cierra el stream
+            writeln('Contenido del exploit:'),
+            writeln(Content).  % Muestra el contenido
+            
+        
+    
+        
+    
+
+
 
 
 mostrar_tipo_dato(V) :-
@@ -214,11 +334,11 @@ iniciar :-
 
 % Ejecutar la opción seleccionada
 ejecutar_opcion(1) :-
-    prompt1('Introduce el nombre de la vulnerabilidad: '),  % Muestra el mensaje.
+    format('Introduce el nombre de la vulnerabilidad: '),  % Muestra el mensaje.
     get_single_char(_),  % Esto asegura que cualquier enter residual sea consumido.
     read_line_to_string(user_input, Nombre),  % Lee la entrada como string.
-    writeln('Nombre ingresado:'), writeln(Nombre),  % Imprime lo que se ingresó.
-    (Nombre \= "" -> consultar_vulnerabilidad_por_nombre(Nombre) ; format('No se ingresó ningún nombre.~n')),
+    atom_string(Atom, Nombre),
+    consultar_vulnerabilidad_por_nombre(Atom),
     iniciar.  % Reinicia el menú.
 
 
@@ -248,6 +368,32 @@ ejecutar_opcion(_) :-
     format('Opción no válida, intenta de nuevo.~n'),
     iniciar.
 
+
+
+descargar_exploit_db :-
+    NombreArchivo = 'exploit_db.csv',
+    (   exists_file(NombreArchivo)
+    ->  format('El archivo ~w ya existe. No se descargará nuevamente.~n', [NombreArchivo])
+    ;   URL = 'https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv',
+        (   descargar_archivo(URL, NombreArchivo)
+        ->  format('El archivo se ha descargado exitosamente y se ha guardado como ~w.~n', [NombreArchivo])
+        ;   format('Hubo un problema al descargar el archivo.~n')
+        )
+    ).
+
+% Descargar la base de datos de CVEs
+descargar_cve_db :-
+    NombreArchivo = 'cve_db.csv',
+    (   exists_file(NombreArchivo)
+    ->  format('El archivo ~w ya existe. No se descargará nuevamente.~n', [NombreArchivo])
+    ;   URL = 'https://cve.mitre.org/data/downloads/allitems.csv',
+        (   descargar_archivo(URL, NombreArchivo)
+        ->  format('El archivo se ha descargado exitosamente y se ha guardado como ~w.~n', [NombreArchivo])
+        ;   format('Hubo un problema al descargar el archivo.~n')
+        )
+    ).
+:- descargar_exploit_db.
+:- descargar_cve_db.
 :- cargar_vulnerabilidades('cve_db.csv').
 :- cargar_exploits('exploit_db.csv').
 :- iniciar.
