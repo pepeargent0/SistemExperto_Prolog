@@ -169,7 +169,6 @@ mostrar_exploits :-
     format('--- Lista de Exploits ---~n'),
     (   exploit(Id, File, Description, DatePublished, Author, Type, Platform, Port, DateAdded, DateUpdated, Verified, Codigo, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
         format('-----------------------------------------------------~n'),
-        
         safe_format('Código: ~w~n', Codigo),
         safe_format('Archivo: ~w~n', File),
         safe_format('Descripción: ~w~n', Description),
@@ -268,7 +267,32 @@ mostrar_vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Co
             preguntar_opcion_exploit(Codigo, Ids)  % Pasar todos los Ids a la función
         ;   format('No se encontró ningún exploit para el código ~w.~n', [Codigo])
         ).
-    
+
+        consultar_exploits_por_tipo(Tipo, So) :-
+            writeln(Tipo),  % Imprime el código para depuración
+            findall(
+                (Id, File, Description, DatePublished, Author, Tipo, So, Port, DateAdded, DateUpdated, Verified, Codes, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+                exploit(Id, File, Description, DatePublished, Author, Tipo, So, Port, DateAdded, DateUpdated, Verified, Codes, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl),
+                Exploits
+            ),
+            (   Exploits \= []  % Si se encuentran exploits
+            ->  format('--- Exploits para el tipo ~w ---~n', [Tipo]),
+                % Extraer todos los IDs
+                findall(Id, member((Id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _), Exploits), Ids),
+                forall(
+                    member((Id, File, Description, DatePublished, Author, Tipo, So, Port, DateAdded, DateUpdated, Verified, Codes, Tags, Aliases, ScreenshotUrl, ApplicationUrl, SourceUrl), Exploits),
+                    (
+                        atom_string(Atomcodes, Codes),  % Asegurar la conversión correcta de Codes
+                        format('Exploit ID: ~w~n', [Id]),
+                        format('Nombre: ~w~n', [Atomcodes]),
+                        format('Descripción: ~w~n', [Description]),
+                        format('Autor: ~w~n', [Author]),
+                        format('Fecha de publicación: ~w~n~n', [DatePublished])
+                    )
+                )
+            ;   format('No se encontró ningún exploit de tipo ~w.~n', [Tipo])  % Si no se encuentran exploits
+            ).
+        
     % Preguntar opción para los exploits
     preguntar_opcion_exploit(Codigo, [Id|Ids]) :-
         writeln('¿Qué deseas hacer?'),
@@ -353,7 +377,23 @@ ejecutar_opcion(2) :-
     iniciar.
 
 ejecutar_opcion(3) :-
-    format('Funcionalidad de recomendaciones de ataque aún no implementada.~n'),
+    format('1. dos~n'),
+    format('2. local~n'),
+    format('3. remote~n'),
+    format('4. webapps~n'),
+    format('¿Que tipo de ataque desea simular?: '),
+    get_single_char(_),  % Esto asegura que cualquier enter residual sea consumido.
+    read_line_to_string(user_input, Tipo),  
+    atom_string(Atom, Tipo),
+    format('1. android~n'),
+    format('2. linux~n'),
+    format('3. windows~n'),
+    format('4. macos~n'),
+    format('¿Que sistema operativo desea ver vulnerabilidades?: '),
+    read_line_to_string(user_input, So),  
+    atom_string(Atom2, So),
+    consultar_exploits_por_tipo(Atom,Atom2),
+    
     iniciar.
 ejecutar_opcion(4) :-
     mostrar_exploits,
