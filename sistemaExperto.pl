@@ -8,8 +8,9 @@
 :- dynamic exploit/16.
 :- dynamic exploits_cargados/0.
 :- discontiguous descargar_exploit_db/0, descargar_cve_db/0.
+:- style_check(-singleton).
+:- style_check(-discontiguous).
 
-% /download/9083
 
 descargar_archivo(URL, NombreArchivo) :-
     setup_call_cleanup(
@@ -27,15 +28,6 @@ descargar_archivo(URL, NombreArchivo) :-
 
 
 % Cargar las vulnerabilidades desde el archivo CSV
-
-
-
-
-
-
-% Cargar vulnerabilidades desde un archivo CSV
-% Cargar vulnerabilidades desde un archivo CSV
-% Cargar vulnerabilidades desde el archivo CSV
 cargar_vulnerabilidades(File) :-
     % Crear un archivo temporal para las filas válidas
     atomic_list_concat(['temp_', File], TempFile),
@@ -91,6 +83,10 @@ assert_vulnerabilidades([Fila|Resto]) :-
 
 
 
+tipo_ataque(1, 'dos').
+tipo_ataque(2, 'local').
+tipo_ataque(3, 'remote').
+tipo_ataque(4, 'webapps').
 
 
 
@@ -232,6 +228,13 @@ mostrar_vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Co
     format('Nombre: ~w~nEstado: ~w~nDescripción: ~w~nReferencias: ~w~nFase: ~w~nVotos: ~w~nComentarios: ~w~n',
         [Nombre, Status, Description, References, Phase, Votes, Comments]).
 
+exploits_por_tipo(Tipo, UniquePlatforms) :-
+    findall(Platform,
+        exploit(_, _, _, _, _, Tipo, Platform, _, _, _, _, _, _, _, _, _, _),
+        Platforms),
+    list_to_set(Platforms, UniquePlatforms).
+        
+
 
 
 % Mostrar una única vulnerabilidad en un formato más legible
@@ -307,7 +310,7 @@ mostrar_vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Co
     
     % Manejar la opción seleccionada por el usuario
     manejar_opcion_exploit(1, Codigo, Id) :-
-        ver_codigo_fonte(Codigo, Id),  % Implementar este predicado según tus necesidades
+        ver_codigo_fonte(Codigo, Id),  % Implementar este predicado según tus necesidades3.
         true.  % Placeholder
 
     manejar_opcion_exploit(2, _, _) :-
@@ -315,24 +318,34 @@ mostrar_vulnerabilidad(Nombre, Status, Description, References, Phase, Votes, Co
     manejar_opcion_exploit(_, Codigo, Id) :-
         writeln('Opción no válida, intenta de nuevo.'),
         ver_codigo_fonte(Codigo, Id).  % O puedes ajustar esto según necesites
-    
         
         
         
-        % Implementar el predicado ver_codigo_fonte con dos parámetros
-        ver_codigo_fonte(Codigo, Id) :-  % Acepta dos parámetros
-            format('Mostrando código fuente para el exploit con código ~w y ID ~w...~n', [Codigo, Id]),
-            atomic_list_concat(['https://www.exploit-db.com/download/', Id], URL),  % Genera la URL
-            http_open(URL, Stream, []),  % Abre la conexión HTTP
-            read_string(Stream, _, Content),  % Lee el contenido del archivo
-            close(Stream),  % Cierra el stream
-            writeln('Contenido del exploit:'),
-            writeln(Content).  % Muestra el contenido
+        
+% Implementar el predicado ver_codigo_fonte con dos parámetros
+ver_codigo_fonte(Codigo, Id) :-  % Acepta dos parámetros
+    format('Mostrando código fuente para el exploit con código ~w y ID ~w...~n', [Codigo, Id]),
+    atomic_list_concat(['https://www.exploit-db.com/download/', Id], URL),  % Genera la URL
+    http_open(URL, Stream, []),  % Abre la conexión HTTP
+    read_string(Stream, _, Content),  % Lee el contenido del archivo
+    close(Stream),  % Cierra el stream
+    writeln('Contenido del exploit:'),
+    writeln(Content).  % Muestra el contenido
             
         
     
         
-    
+ % Mostrar lista de exploits
+mostrar_exploits_lista([]).
+mostrar_exploits_lista([(Id, Codes, Description, DatePublished, Author)|Rest]) :-
+    format('Exploit ID: ~w~n', [Id]),
+    format('Nombre: ~w~n', [Codes]),
+    format('Descripción: ~w~n', [Description]),
+    format('Autor: ~w~n', [Author]),
+    format('Fecha de publicación: ~w~n', [DatePublished]),
+    format('---~n'),
+    mostrar_exploits_lista(Rest).
+   
 
 
 
@@ -373,28 +386,126 @@ ejecutar_opcion(2) :-
     read_line_to_string(user_input, Codigo),  
     atom_string(Atom, Codigo),
     consultar_exploits_por_codigo(Atom),
-    
     iniciar.
 
+exploits_por_tipo_y_plataforma(Tipo, Plataforma, Exploits) :-
+    findall(
+        (Id, Codes, Description, DatePublished, Author),
+        exploit(Id, _, Description, DatePublished, Author, Tipo, Plataforma, _, _, _, _, Codes, _, _, _, _, _),
+        Exploits
+    ).
+
+% Mostrar plataformas numeradas, cinco por línea
+mostrar_plataformas_numeradas(Platforms) :-
+    mostrar_plataformas_numeradas(Platforms, 1).
+
+mostrar_plataformas_numeradas([], _).
+mostrar_plataformas_numeradas(Platforms, N) :-
+    mostrar_cinco_plataformas(Platforms, N, SiguienteN, RestPlatforms),
+    (   RestPlatforms \= []
+    ->  mostrar_plataformas_numeradas(RestPlatforms, SiguienteN)
+    ;   true
+    ).
+
+mostrar_cinco_plataformas(Platforms, N, SiguienteN, RestPlatforms) :-
+    take(5, Platforms, PrimeraLinea, RestPlatforms),
+    mostrar_linea_plataformas(PrimeraLinea, N, SiguienteN).
+
+% Toma N elementos de la lista
+take(0, Rest, [], Rest).
+take(_, [], [], []).
+take(N, [X|Xs], [X|Ys], Rest) :-
+    N > 0,
+    N1 is N - 1,
+    take(N1, Xs, Ys, Rest).
+
+% Muestra una línea de plataformas con sus números
+mostrar_linea_plataformas([], N, N) :-
+    format('~n').
+mostrar_linea_plataformas([P|Ps], N, SiguienteN) :-
+    format('~w. ~w\t', [N, P]),
+    N1 is N + 1,
+    (   Ps = []
+    ->  SiguienteN = N1,
+        format('~n')
+    ;   mostrar_linea_plataformas(Ps, N1, SiguienteN)
+    ).
+
+% Mostrar exploits numerados, dos por línea
+mostrar_exploits_numerados(Exploits) :-
+    mostrar_exploits_numerados(Exploits, 1).
+
+mostrar_exploits_numerados([], _).
+mostrar_exploits_numerados([Exploit1, Exploit2 | Rest], N) :-
+    Exploit1 = (_, Name1, Description1, _, _),
+    Exploit2 = (_, Name2, Description2, _, _),
+    format('~w. ~w: ~w\t~w. ~w: ~w~n', [N, Name1, Description1, N+1, Name2, Description2]),
+    N2 is N + 2,
+    mostrar_exploits_numerados(Rest, N2).
+mostrar_exploits_numerados([Exploit], N) :-
+    Exploit = (_, Name, Description, _, _),
+    format('~w. ~w: ~w~n', [N, Name, Description]).
+
 ejecutar_opcion(3) :-
-    format('1. dos~n'),
-    format('2. local~n'),
-    format('3. remote~n'),
-    format('4. webapps~n'),
-    format('¿Que tipo de ataque desea simular?: '),
-    get_single_char(_),  % Esto asegura que cualquier enter residual sea consumido.
-    read_line_to_string(user_input, Tipo),  
-    atom_string(Atom, Tipo),
-    format('1. android~n'),
-    format('2. linux~n'),
-    format('3. windows~n'),
-    format('4. macos~n'),
-    format('¿Que sistema operativo desea ver vulnerabilidades?: '),
-    read_line_to_string(user_input, So),  
-    atom_string(Atom2, So),
-    consultar_exploits_por_tipo(Atom,Atom2),
+    % Mostrar opciones de tipos de ataque
+    writeln('Seleccione el tipo de ataque:'),
+    writeln('1. dos'),
+    writeln('2. local'),
+    writeln('3. remote'),
+    writeln('4. webapps'),
+    write('¿Qué tipo de ataque desea simular?: '),
+    read(TipoNum),
+    % Mapear el número ingresado al tipo de ataque
+    (   tipo_ataque(TipoNum, Tipo)
+    ->  format('Has seleccionado el tipo de ataque: ~w~n', [Tipo])
+    ;   writeln('Opción no válida para tipo de ataque, intenta de nuevo.'),
+        ejecutar_opcion(3)
+    ),
+    % Obtener las plataformas para el tipo seleccionado
+    exploits_por_tipo(Tipo, Platforms),
+    (   Platforms \= []
+    ->  % Mostrar las plataformas al usuario, numeradas y cinco por línea
+        format('Las plataformas disponibles para el tipo ~w son:~n', [Tipo]),
+        mostrar_plataformas_numeradas(Platforms),
+        % Permitir al usuario seleccionar una plataforma
+        write('Seleccione el número de la plataforma que desea: '),
+        read(PlatformNum),
+        % Verificar si la opción es válida
+        (   nth1(PlatformNum, Platforms, PlataformaSeleccionada)
+        ->  format('Has seleccionado la plataforma: ~w~n', [PlataformaSeleccionada]),
+            % Obtener los exploits para la combinación de tipo y plataforma
+            exploits_por_tipo_y_plataforma(Tipo, PlataformaSeleccionada, Exploits),
+            (   Exploits \= []
+            ->  format('--- Exploits para el tipo ~w y plataforma ~w ---~n', [Tipo, PlataformaSeleccionada]),
+                mostrar_exploits_numerados(Exploits),
+                % Permitir al usuario seleccionar un exploit
+                write('Seleccione el número del exploit que desea: '),
+                read(ExploitNum),
+                % Verificar si la opción es válida
+                (   nth1(ExploitNum, Exploits, ExploitSeleccionado)
+                ->  ExploitSeleccionado = (_, CodigoExploit, _, _, _),
+                    consultar_exploits_por_codigo(CodigoExploit)
+                ;   writeln('Opción no válida para exploit, intenta de nuevo.'),
+                    ejecutar_opcion(3)
+                )
+            ;   format('No se encontraron exploits para el tipo ~w y plataforma ~w.~n', [Tipo, PlataformaSeleccionada]),
+                iniciar
+            )
+        ;   writeln('Opción no válida para plataforma, intenta de nuevo.'),
+            ejecutar_opcion(3)
+        )
+    ;   writeln('No hay plataformas disponibles para este tipo de ataque.'),
+        iniciar
+    ).
     
-    iniciar.
+    
+    
+
+
+
+
+
+
 ejecutar_opcion(4) :-
     mostrar_exploits,
     iniciar.
